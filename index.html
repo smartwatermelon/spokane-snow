@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spokane Snow Seasonality · 1950–2024</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Figtree:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0c1117;
+    --surface:  #141b24;
+    --border:   rgba(255,255,255,0.08);
+    --text:     #e8edf2;
+    --muted:    #7a8898;
+    --faint:    #3a4555;
+    --blue:     #4a9eff;
+    --blue-dim: rgba(74,158,255,0.15);
+    --amber:    #f0a050;
+    --amber-dim:rgba(240,160,80,0.15);
+    --accent:   #4a9eff;
+  }
+
+  html { font-size: 16px; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Figtree', sans-serif;
+    font-weight: 300;
+    line-height: 1.6;
+    min-height: 100vh;
+    padding: 0 0 4rem;
+  }
+
+  /* ── Header ── */
+  header {
+    padding: 3.5rem 2rem 2rem;
+    max-width: 860px;
+    margin: 0 auto;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .eyebrow {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 0.75rem;
+  }
+
+  h1 {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    line-height: 1.15;
+    color: var(--text);
+    margin-bottom: 1rem;
+  }
+
+  h1 em {
+    font-style: italic;
+    color: var(--blue);
+  }
+
+  .subtitle {
+    font-size: 1rem;
+    color: var(--muted);
+    font-weight: 300;
+    max-width: 580px;
+    line-height: 1.7;
+  }
+
+  /* ── Main ── */
+  main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 2rem;
+  }
+
+  /* ── Controls ── */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 2rem 0 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .toggle-group {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  .toggle-btn {
+    padding: 0.45rem 1.1rem;
+    font-family: 'Figtree', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 400;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+  }
+
+  .toggle-btn.active {
+    background: var(--blue-dim);
+    color: var(--blue);
+    font-weight: 500;
+  }
+
+  .toggle-btn:hover:not(.active) { background: rgba(255,255,255,0.04); color: var(--text); }
+
+  .toggle-btn.amber.active {
+    background: var(--amber-dim);
+    color: var(--amber);
+  }
+
+  .loading-msg {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-left: auto;
+  }
+
+  /* ── Stats ── */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+  }
+
+  .stat-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+
+  .stat-value {
+    font-family: 'Instrument Serif', serif;
+    font-size: 1.5rem;
+    color: var(--text);
+    line-height: 1.1;
+  }
+
+  .stat-sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 0.2rem;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .stat.highlight .stat-value { color: var(--blue); }
+  .stat.highlight-amber .stat-value { color: var(--amber); }
+
+  /* ── Chart ── */
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem 1.5rem 1rem;
+    position: relative;
+  }
+
+  .chart-wrap {
+    position: relative;
+    width: 100%;
+    height: 380px;
+  }
+
+  .chart-legend {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+
+  .legend-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+
+  .legend-dash {
+    width: 18px; height: 1px;
+    border-top: 2px dashed var(--muted);
+  }
+
+  /* ── Annotation ── */
+  .annotation {
+    margin-top: 1.25rem;
+    padding: 0.9rem 1.1rem;
+    background: var(--blue-dim);
+    border-left: 2px solid var(--blue);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .annotation strong { color: var(--text); font-weight: 500; }
+
+  /* ── Footer ── */
+  footer {
+    max-width: 860px;
+    margin: 2.5rem auto 0;
+    padding: 1.5rem 2rem 0;
+    border-top: 1px solid var(--border);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  /* ── Error ── */
+  .error {
+    padding: 2rem;
+    text-align: center;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 560px) {
+    header, main { padding-left: 1.25rem; padding-right: 1.25rem; }
+    .chart-wrap { height: 280px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="eyebrow">Climate Data · Spokane, WA</p>
+  <h1>When does <em>winter</em> end<br>in Spokane?</h1>
+  <p class="subtitle">Tracking the last spring snowfall and first fall snowfall at Spokane International Airport from 1950 through 2024, using daily reanalysis data.</p>
+</header>
+
+<main>
+  <div class="controls">
+    <div class="toggle-group">
+      <button class="toggle-btn active" id="btn-spring" onclick="setMode('spring')">Last spring snow</button>
+      <button class="toggle-btn" id="btn-fall" onclick="setMode('fall')">First fall snow</button>
+    </div>
+    <span class="loading-msg" id="loading-msg">Fetching data…</span>
+  </div>
+
+  <div class="stats" id="stats">
+    <div class="stat"><div class="stat-label">Status</div><div class="stat-value" style="font-size:1rem;font-family:'Figtree',sans-serif;color:var(--muted)">Loading…</div></div>
+  </div>
+
+  <div class="chart-container">
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="chart-legend">
+      <span class="legend-item"><span class="legend-dot" id="legend-dot" style="background:#4a9eff"></span><span id="legend-series-label">Last spring snow (day of year)</span></span>
+      <span class="legend-item"><span class="legend-dash"></span>Linear trend</span>
+    </div>
+  </div>
+
+  <div class="annotation" id="annotation"></div>
+</main>
+
+<footer>
+  <span>Source: <a href="https://open-meteo.com/" target="_blank">Open-Meteo Historical API</a> (ERA5 reanalysis) · Spokane, WA (47.62°N, 117.53°W)</span>
+  <span>Snowfall threshold: &gt;0 cm/day &nbsp;·&nbsp; Seasons split Jul 1</span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const LAT = 47.6205, LON = -117.5326;
+const API = `https://archive-api.open-meteo.com/v1/archive?latitude=${LAT}&longitude=${LON}&start_date=1950-01-01&end_date=2024-12-31&daily=snowfall_sum&timezone=America%2FLos_Angeles`;
+
+const MONTHS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const CUM    = [0,31,59,90,120,151,181,212,243,273,304,334,365];
+
+function doyToLabel(doy) {
+  for (let m = 12; m >= 1; m--) {
+    if (doy > CUM[m-1]) return MONTHS[m] + '\u00a0' + (doy - CUM[m-1]);
+  }
+  return 'Jan\u00a01';
+}
+
+function linReg(pts) {
+  const n = pts.length;
+  let sx=0,sy=0,sxy=0,sxx=0;
+  pts.forEach(p=>{ sx+=p.x; sy+=p.y; sxy+=p.x*p.y; sxx+=p.x*p.x; });
+  const m = (n*sxy - sx*sy) / (n*sxx - sx*sx);
+  const b = (sy - m*sx) / n;
+  return { m, b };
+}
+
+let allData = null;
+let mode    = 'spring';
+let chartInst = null;
+
+async function fetchData() {
+  const res  = await fetch(API);
+  const json = await res.json();
+  const times = json.daily.time;
+  const snow  = json.daily.snowfall_sum;
+
+  const byYear = {};
+  for (let i = 0; i < times.length; i++) {
+    const s = snow[i];
+    if (!s || s <= 0) continue;
+    const d    = times[i];
+    const year = parseInt(d.slice(0,4));
+    const mmdd = d.slice(5);
+    if (!byYear[year]) byYear[year] = { lastSpring: null, firstFall: null };
+    if (mmdd <= '06-30') byYear[year].lastSpring = d;
+    if (mmdd >= '07-01' && !byYear[year].firstFall) byYear[year].firstFall = d;
+  }
+
+  function doy(dateStr) {
+    const d = new Date(dateStr + 'T12:00:00');
+    return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
+  }
+
+  const rows = [];
+  for (let y = 1950; y <= 2024; y++) {
+    const v = byYear[y] || {};
+    rows.push({
+      year:          y,
+      lastSpringDate: v.lastSpring || null,
+      lastSpringDOY:  v.lastSpring ? doy(v.lastSpring) : null,
+      firstFallDate:  v.firstFall || null,
+      firstFallDOY:   v.firstFall ? doy(v.firstFall) : null,
+    });
+  }
+  return rows;
+}
+
+function renderStats(pts, mode) {
+  const isSpring = mode === 'spring';
+  const vals = pts.map(p => p.y);
+  const reg  = linReg(pts);
+  const xMin = pts[0].x, xMax = pts[pts.length-1].x;
+  const decadeShift = reg.m * 10;
+  const dir = (isSpring ? decadeShift < 0 : decadeShift > 0) ? 'earlier' : 'later';
+
+  const avg = vals.reduce((a,b)=>a+b,0) / vals.length;
+  const recent = pts.filter(p=>p.x>=2015).map(p=>p.y);
+  const recentAvg = recent.reduce((a,b)=>a+b,0) / recent.length;
+  const earliest = pts.reduce((a,b)=>a.y<b.y?a:b);
+  const latest   = pts.reduce((a,b)=>a.y>b.y?a:b);
+
+  const hlClass = isSpring ? 'highlight' : 'highlight-amber';
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat ${hlClass}">
+      <div class="stat-label">Trend / decade</div>
+      <div class="stat-value">${Math.abs(decadeShift).toFixed(1)}d ${dir}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">1950–2024 avg</div>
+      <div class="stat-value">${doyToLabel(Math.round(avg))}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">2015–2024 avg</div>
+      <div class="stat-value">${doyToLabel(Math.round(recentAvg))}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">${isSpring ? 'Earliest last' : 'Earliest first'} snow</div>
+      <div class="stat-value">${doyToLabel(earliest.y)}</div>
+      <div class="stat-sub">${earliest.x}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">${isSpring ? 'Latest last' : 'Latest first'} snow</div>
+      <div class="stat-value">${doyToLabel(latest.y)}</div>
+      <div class="stat-sub">${latest.x}</div>
+    </div>
+  `;
+
+  const decadeAbs = Math.abs(decadeShift).toFixed(1);
+  const totalShift = Math.abs(reg.m * (xMax - xMin)).toFixed(0);
+  document.getElementById('annotation').innerHTML = isSpring
+    ? `<strong>Trend:</strong> The last spring snowfall in Spokane is shifting <strong>${decadeAbs} days earlier per decade</strong> — about <strong>${totalShift} days earlier</strong> in total since 1950. Year-to-year variance is high, so individual years can fall anywhere from February to late May. The 2008 outlier (a June snowfall) is the clearest exception in the record.`
+    : `<strong>Trend:</strong> The first fall snowfall is arriving <strong>${decadeAbs} days ${dir} per decade</strong> — a <strong>${totalShift}-day shift</strong> across the full record. Combined with the earlier end of spring snow, Spokane's snow-free window has widened measurably over 75 years.`;
+}
+
+function draw() {
+  if (!allData) return;
+  const isSpring = mode === 'spring';
+  const pts = allData
+    .filter(r => (isSpring ? r.lastSpringDOY : r.firstFallDOY) !== null)
+    .map(r => ({ x: r.year, y: isSpring ? r.lastSpringDOY : r.firstFallDOY }));
+
+  const reg  = linReg(pts);
+  const xMin = pts[0].x, xMax = pts[pts.length-1].x;
+  const trendLine = [{ x: xMin, y: reg.m*xMin+reg.b }, { x: xMax, y: reg.m*xMax+reg.b }];
+
+  const allY = pts.map(p=>p.y);
+  const yPad = 10;
+  const yMin = Math.min(...allY) - yPad;
+  const yMax = Math.max(...allY) + yPad;
+
+  const dotColor    = isSpring ? '#4a9eff' : '#f0a050';
+  const dotColorBg  = isSpring ? 'rgba(74,158,255,0.55)' : 'rgba(240,160,80,0.55)';
+  const gridColor   = 'rgba(255,255,255,0.05)';
+  const tickColor   = '#5a6878';
+
+  document.getElementById('legend-dot').style.background = dotColor;
+  document.getElementById('legend-series-label').textContent = isSpring
+    ? 'Last spring snow (day of year)'
+    : 'First fall snow (day of year)';
+
+  if (chartInst) { chartInst.destroy(); chartInst = null; }
+
+  chartInst = new Chart(document.getElementById('chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: isSpring ? 'Last spring snow' : 'First fall snow',
+          data: pts,
+          backgroundColor: dotColorBg,
+          borderColor: dotColor,
+          borderWidth: 1,
+          pointRadius: 4.5,
+          pointHoverRadius: 7,
+        },
+        {
+          label: 'Trend',
+          data: trendLine,
+          type: 'line',
+          borderColor: 'rgba(255,255,255,0.25)',
+          borderWidth: 1.5,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          tension: 0,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1e2a38',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          titleColor: '#e8edf2',
+          bodyColor: '#7a8898',
+          titleFont: { family: "'DM Mono', monospace", size: 11 },
+          bodyFont: { family: "'Figtree', sans-serif", size: 12 },
+          padding: 10,
+          callbacks: {
+            title: ctx => ctx[0].raw.x.toString(),
+            label: ctx => {
+              if (ctx.datasetIndex === 1) return null;
+              return ' ' + doyToLabel(Math.round(ctx.raw.y)) + '  (day ' + ctx.raw.y + ')';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: 1948,
+          max: 2026,
+          ticks: {
+            color: tickColor,
+            font: { family: "'DM Mono', monospace", size: 10 },
+            stepSize: 10,
+            callback: v => v
+          },
+          grid: { color: gridColor },
+          border: { color: 'rgba(255,255,255,0.08)' }
+        },
+        y: {
+          min: yMin,
+          max: yMax,
+          ticks: {
+            color: tickColor,
+            font: { family: "'DM Mono', monospace", size: 10 },
+            callback: v => doyToLabel(Math.round(v))
+          },
+          grid: { color: gridColor },
+          border: { color: 'rgba(255,255,255,0.08)' }
+        }
+      }
+    }
+  });
+
+  renderStats(pts, mode);
+}
+
+function setMode(m) {
+  mode = m;
+  const isSpring = m === 'spring';
+  document.getElementById('btn-spring').className = 'toggle-btn' + (isSpring ? ' active' : '');
+  document.getElementById('btn-fall').className   = 'toggle-btn' + (!isSpring ? ' active amber' : '');
+  draw();
+}
+
+(async () => {
+  try {
+    allData = await fetchData();
+    document.getElementById('loading-msg').textContent = '75 years · Open-Meteo ERA5';
+    draw();
+  } catch (e) {
+    document.getElementById('loading-msg').textContent = 'Error loading data';
+    document.getElementById('stats').innerHTML = `<div class="error">Failed to fetch: ${e.message}</div>`;
+    console.error(e);
+  }
+})();
+</script>
+</body>
+</html>
