@@ -299,7 +299,7 @@
 
 <header>
   <p class="eyebrow">Climate Data · Spokane, WA</p>
-  <h1>When does <em>winter</em> end<br>in Spokane?</h1>
+  <h1>When does <em>winter</em> <span id="title-verb">end</span><br>in Spokane?</h1>
   <p class="subtitle">Tracking the last spring snowfall and first fall snowfall near Spokane International Airport since 1950, using daily ERA5 reanalysis data, with climate-model projections to 2050.</p>
 </header>
 
@@ -730,6 +730,9 @@ function setMode(m) {
   const isSpring = m === 'spring';
   document.getElementById('btn-spring').className = 'toggle-btn' + (isSpring ? ' active lilac' : '');
   document.getElementById('btn-fall').className   = 'toggle-btn' + (!isSpring ? ' active' : '');
+  // Last spring snow answers "when does winter end"; first fall snow answers
+  // "when does winter begin".
+  document.getElementById('title-verb').textContent = isSpring ? 'end' : 'begin';
   draw();
 }
 
