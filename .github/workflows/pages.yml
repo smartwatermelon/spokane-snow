@@ -1,0 +1,79 @@
+name: Pages
+
+# Publishes the site with data served alongside it, so visitors never call
+# Open-Meteo. The daily run refreshes recent ERA5 days (a ~7-call request
+# instead of the ~2,000-call full history a page load used to make).
+# Requires Settings → Pages → Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 14 * * *' # daily, 07:23 PDT
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test data updater
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node --test scripts/update-era5.test.mjs
+
+  build:
+    name: Build site
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A refused or failed fetch (e.g. Open-Meteo quota) must not block the
+      # deploy: the site then ships the committed data, the page shows the
+      # date its data runs through, and the warning below flags the run.
+      - name: Refresh recent ERA5 days
+        id: refresh
+        continue-on-error: true
+        run: node scripts/update-era5.mjs data/era5.json
+      - name: Warn if refresh failed
+        if: steps.refresh.outcome == 'failure'
+        run: echo "::warning::ERA5 refresh failed; deploying committed data."
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site/data
+          cp index.html _site/
+          cp data/era5.json data/climate.json _site/data/
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # publish the Pages deployment
+      id-token: write # OIDC token deploy-pages uses to verify the run
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
