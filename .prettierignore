@@ -1,0 +1,3 @@
+# Generated data (scripts/update-era5.mjs writes compact JSON); formatting
+# would multiply its size and churn every refresh.
+data/

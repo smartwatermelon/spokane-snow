@@ -1,0 +1,3 @@
+# Generated data (see scripts/update-era5.mjs). Single-line JSON of ~1.7 MB:
+# a text diff is unreadable and overflows review tooling.
+data/*.json -diff linguist-generated=true

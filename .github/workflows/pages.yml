@@ -1,0 +1,96 @@
+name: Pages
+
+# Publishes the site with data served alongside it, so visitors never call
+# Open-Meteo. Each run starts from the deployed era5.json (state is kept in
+# the deployment, since main is protected) and fetches only a ~90-day
+# window: about 7 weighted calls, not the ~2,000 of the full history.
+# Requires Settings → Pages → Source: "GitHub Actions".
+# Note: GitHub disables schedules in repos with no activity for 60 days.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 14 * * *' # daily, 07:23 PDT
+  workflow_dispatch:
+
+permissions: {}
+
+# Superseded PR runs are cancelled; main runs queue instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Test data updater
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node --test scripts/update-era5.test.mjs
+
+  build:
+    name: Build site
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read # configure-pages reads the site's URL
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      # Neither step below may block the deploy. On failure the site ships
+      # the newest data available, the page shows the date that data runs
+      # through, and the warning flags the run.
+      - name: Start from deployed data
+        id: adopt
+        continue-on-error: true
+        env:
+          DEPLOYED_URL: ${{ steps.pages.outputs.base_url }}/data/era5.json
+        run: node scripts/update-era5.mjs adopt data/era5.json "$DEPLOYED_URL"
+      - name: Refresh recent ERA5 days
+        id: refresh
+        continue-on-error: true
+        run: node scripts/update-era5.mjs refresh data/era5.json
+      - name: Warn on data step failure
+        if: steps.adopt.outcome == 'failure' || steps.refresh.outcome == 'failure'
+        env:
+          ADOPT: ${{ steps.adopt.outcome }}
+          REFRESH: ${{ steps.refresh.outcome }}
+        run: echo "::warning::Data step failed (adopt=$ADOPT, refresh=$REFRESH); deploying the newest data available."
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site/data
+          cp index.html _site/
+          cp data/era5.json data/climate.json _site/data/
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # publish the Pages deployment
+      id-token: write # OIDC token deploy-pages uses to verify the run
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

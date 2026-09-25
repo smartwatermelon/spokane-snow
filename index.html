@@ -318,7 +318,7 @@
     <div class="toggle-group">
       <button class="toggle-btn" id="btn-proj" onclick="toggleProjections()" disabled>Projections</button>
     </div>
-    <span class="loading-msg" id="loading-msg">Fetching data…</span>
+    <span class="loading-msg" id="loading-msg">Loading data…</span>
   </div>
 
   <div class="stats" id="stats">
@@ -347,8 +347,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-const LAT = 47.6205, LON = -117.5326;
-const START_YEAR = 1950;
 // Common baseline for aligning model output to observations.
 const BASE_START = 1950, BASE_END = 2024;
 const PROJ_START = 2025, PROJ_END = 2050;
@@ -361,19 +359,15 @@ const MODELS = ['HiRAM_SIT_HR', 'MRI_AGCM3_2_S', 'EC_Earth3P_HR', 'MPI_ESM1_2_XR
 const MONTHS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const CUM    = [0,31,59,90,120,151,181,212,243,273,304,334,365];
 
-function isoDate(d) {
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
-}
-
-function yesterday() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return isoDate(d);
-}
-
-const ERA5_API = `https://archive-api.open-meteo.com/v1/archive?latitude=${LAT}&longitude=${LON}&start_date=${START_YEAR}-01-01&end_date=${yesterday()}&daily=snowfall_sum&models=era5&timezone=America%2FLos_Angeles`;
-const CLIMATE_API = `https://climate-api.open-meteo.com/v1/climate?latitude=${LAT}&longitude=${LON}&start_date=${START_YEAR}-01-01&end_date=${PROJ_END}-12-31&daily=snowfall_sum&models=${MODELS.join(',')}`;
+// Data is served with the page, not fetched from Open-Meteo per visit: its
+// free tier weights requests by length, and the full history costs roughly
+// 2,000 of the 10,000 calls/day allowed per IP. A daily GitHub Action
+// (.github/workflows/pages.yml) refreshes era5.json with
+// scripts/update-era5.mjs. climate.json is static: Open-Meteo Climate API,
+// 1950-01-01..2050-12-31, daily=snowfall_sum, the MODELS above, at
+// 47.6205, -117.5326.
+const ERA5_URL = 'data/era5.json';
+const CLIMATE_URL = 'data/climate.json';
 
 // Day of year on a fixed 365-day calendar, so the same date gets the same
 // number in leap and non-leap years and matches doyToLabel. Feb 29 → Feb 28.
@@ -504,10 +498,8 @@ let chartInst = null;
 
 async function getJSON(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).host}`);
-  const json = await res.json();
-  if (json.error) throw new Error(json.reason || 'API error');
-  return json;
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.json();
 }
 
 function observedPoints() {
@@ -750,16 +742,16 @@ function setThreshold(th) {
 
 let obsLabel = '';
 
-// The climate request is large and Open-Meteo rate-limits per minute, so it
-// is fetched only when the viewer first asks for projections.
+// climate.json is about 1.2 MB, so it loads only when the viewer first asks
+// for projections.
 async function toggleProjections() {
   const btn = document.getElementById('btn-proj');
   const msg = document.getElementById('loading-msg');
   if (!climate) {
     btn.disabled = true;
-    msg.textContent = 'Fetching projections…';
+    msg.textContent = 'Loading projections…';
     try {
-      climate = await getJSON(CLIMATE_API);
+      climate = await getJSON(CLIMATE_URL);
       msg.textContent = obsLabel;
     } catch (e) {
       msg.textContent = `Projections failed: ${e.message}`;
@@ -777,18 +769,20 @@ async function toggleProjections() {
 (async () => {
   const msg = document.getElementById('loading-msg');
   try {
-    era5 = await getJSON(ERA5_API);
+    era5 = await getJSON(ERA5_URL);
   } catch (e) {
     msg.textContent = 'Error loading data';
     const err = document.createElement('div');
     err.className = 'error';
-    err.textContent = `Failed to fetch observations: ${e.message}`;
+    err.textContent = `Failed to load observations: ${e.message}`;
     document.getElementById('stats').replaceChildren(err);
     console.error(e);
     return;
   }
-  const years = era5.daily.time;
-  obsLabel = `${years[0].slice(0, 4)}–${years[years.length-1].slice(0, 4)} · ERA5`;
+  const d = era5.daily;
+  let last = d.time.length - 1;
+  while (last > 0 && d.snowfall_sum[last] === null) last--;
+  obsLabel = `ERA5 through ${d.time[last]}`;
   msg.textContent = obsLabel;
   document.getElementById('btn-proj').disabled = false;
   draw();
