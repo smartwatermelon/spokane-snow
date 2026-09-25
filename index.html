@@ -16,11 +16,14 @@
     --text:     #e8edf2;
     --muted:    #7a8898;
     --faint:    #3a4555;
-    --blue:     #4a9eff;
-    --blue-dim: rgba(74,158,255,0.15);
-    --amber:    #f0a050;
-    --amber-dim:rgba(240,160,80,0.15);
-    --accent:   #4a9eff;
+    /* Winter blue for first fall snow; lilac (Spokane is the Lilac City)
+       for last spring snow. */
+    --winter:     #3d8fe0;
+    --winter-dim: rgba(61,143,224,0.15);
+    --lilac:      #a879d8;
+    --lilac-dim:  rgba(168,121,216,0.15);
+    --rim:        rgba(232,242,255,0.85);
+    --accent:     #3d8fe0;
   }
 
   html { font-size: 16px; }
@@ -49,7 +52,7 @@
     font-weight: 500;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--blue);
+    color: var(--winter);
     margin-bottom: 0.75rem;
   }
 
@@ -64,7 +67,7 @@
 
   h1 em {
     font-style: italic;
-    color: var(--blue);
+    color: var(--winter);
   }
 
   .subtitle {
@@ -114,16 +117,16 @@
   }
 
   .toggle-btn.active {
-    background: var(--blue-dim);
-    color: var(--blue);
+    background: var(--winter-dim);
+    color: var(--winter);
     font-weight: 500;
   }
 
   .toggle-btn:hover:not(.active) { background: rgba(255,255,255,0.04); color: var(--text); }
 
-  .toggle-btn.amber.active {
-    background: var(--amber-dim);
-    color: var(--amber);
+  .toggle-btn.lilac.active {
+    background: var(--lilac-dim);
+    color: var(--lilac);
   }
 
   .toggle-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -184,8 +187,8 @@
     font-family: 'DM Mono', monospace;
   }
 
-  .stat.highlight .stat-value { color: var(--blue); }
-  .stat.highlight-amber .stat-value { color: var(--amber); }
+  .stat.highlight .stat-value { color: var(--winter); }
+  .stat.highlight-lilac .stat-value { color: var(--lilac); }
 
   /* ── Chart ── */
   .chart-container {
@@ -242,12 +245,17 @@
   .annotation {
     margin-top: 1.25rem;
     padding: 0.9rem 1.1rem;
-    background: var(--blue-dim);
-    border-left: 2px solid var(--blue);
+    background: var(--winter-dim);
+    border-left: 2px solid var(--winter);
     border-radius: 0 6px 6px 0;
     font-size: 0.85rem;
     color: var(--muted);
     line-height: 1.6;
+  }
+
+  .annotation.lilac {
+    background: var(--lilac-dim);
+    border-left-color: var(--lilac);
   }
 
   .annotation strong { color: var(--text); font-weight: 500; }
@@ -298,7 +306,7 @@
 <main>
   <div class="controls">
     <div class="toggle-group">
-      <button class="toggle-btn active" id="btn-spring" onclick="setMode('spring')">Last spring snow</button>
+      <button class="toggle-btn active lilac" id="btn-spring" onclick="setMode('spring')">Last spring snow</button>
       <button class="toggle-btn" id="btn-fall" onclick="setMode('fall')">First fall snow</button>
     </div>
     <span class="control-label">Min. snowfall</span>
@@ -322,7 +330,7 @@
       <canvas id="chart"></canvas>
     </div>
     <div class="chart-legend">
-      <span class="legend-item"><span class="legend-dot" id="legend-dot" style="background:#4a9eff"></span><span id="legend-series-label">Last spring snow (day of year)</span></span>
+      <span class="legend-item"><span class="legend-dot" id="legend-dot" style="background:#a879d8"></span><span id="legend-series-label">Last spring snow (day of year)</span></span>
       <span class="legend-item"><span class="legend-dash"></span>Linear trend (observed)</span>
       <span class="legend-item" id="legend-proj" hidden><span class="legend-band" id="legend-proj-band"></span>Projection: model median + range, 11-yr smoothed</span>
     </div>
@@ -528,7 +536,7 @@ function renderStats(pts, proj) {
   const earliest = pts.reduce((a, b) => a.y <= b.y ? a : b);
   const latest   = pts.reduce((a, b) => a.y >= b.y ? a : b);
   const which = isSpring ? 'last' : 'first';
-  const hlClass = isSpring ? 'highlight' : 'highlight-amber';
+  const hlClass = isSpring ? 'highlight-lilac' : 'highlight';
 
   let html = `
     <div class="stat ${hlClass}">
@@ -581,7 +589,9 @@ function renderStats(pts, proj) {
   if (threshold === 0) {
     paras.push(`"Any" counts days with only a trace of modelled snowfall. Try ≥1 cm to see how much the answer depends on that choice.`);
   }
-  document.getElementById('annotation').innerHTML = paras.map(p => `<p>${p}</p>`).join('');
+  const note = document.getElementById('annotation');
+  note.innerHTML = paras.map(p => `<p>${p}</p>`).join('');
+  note.classList.toggle('lilac', isSpring);
 }
 
 function draw() {
@@ -610,9 +620,10 @@ function draw() {
   const yMin = Math.min(...allY) - yPad;
   const yMax = Math.max(...allY) + yPad;
 
-  const dotColor    = isSpring ? '#4a9eff' : '#f0a050';
-  const dotColorBg  = isSpring ? 'rgba(74,158,255,0.55)' : 'rgba(240,160,80,0.55)';
-  const bandColor   = isSpring ? 'rgba(74,158,255,0.14)' : 'rgba(240,160,80,0.14)';
+  const dotColor    = isSpring ? '#a879d8' : '#3d8fe0';
+  const dotColorBg  = isSpring ? 'rgba(168,121,216,0.6)' : 'rgba(61,143,224,0.6)';
+  const dotBorder   = isSpring ? dotColor : 'rgba(232,242,255,0.85)'; // white rim = snow
+  const bandColor   = isSpring ? 'rgba(168,121,216,0.16)' : 'rgba(61,143,224,0.16)';
   const gridColor   = 'rgba(255,255,255,0.05)';
   const tickColor   = '#5a6878';
 
@@ -630,8 +641,8 @@ function draw() {
       label: isSpring ? 'Last spring snow' : 'First fall snow',
       data: pts,
       backgroundColor: dotColorBg,
-      borderColor: dotColor,
-      borderWidth: 1,
+      borderColor: dotBorder,
+      borderWidth: isSpring ? 1 : 1.2,
       pointRadius: 4.5,
       pointHoverRadius: 7,
     },
@@ -724,8 +735,8 @@ function draw() {
 function setMode(m) {
   mode = m;
   const isSpring = m === 'spring';
-  document.getElementById('btn-spring').className = 'toggle-btn' + (isSpring ? ' active' : '');
-  document.getElementById('btn-fall').className   = 'toggle-btn' + (!isSpring ? ' active amber' : '');
+  document.getElementById('btn-spring').className = 'toggle-btn' + (isSpring ? ' active lilac' : '');
+  document.getElementById('btn-fall').className   = 'toggle-btn' + (!isSpring ? ' active' : '');
   draw();
 }
 
