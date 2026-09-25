@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Spokane Snow Seasonality · 1950–2024</title>
+<title>Spokane Snow Seasonality</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Figtree:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -126,6 +126,18 @@
     color: var(--amber);
   }
 
+  .toggle-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .control-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-left: 0.5rem;
+  }
+
   .loading-msg {
     font-family: 'DM Mono', monospace;
     font-size: 0.75rem;
@@ -218,6 +230,14 @@
     border-top: 2px dashed var(--muted);
   }
 
+  .legend-band {
+    width: 18px; height: 8px;
+    border-radius: 2px;
+    border-top: 2px dashed;
+  }
+
+  .legend-item[hidden] { display: none; }
+
   /* ── Annotation ── */
   .annotation {
     margin-top: 1.25rem;
@@ -231,6 +251,7 @@
   }
 
   .annotation strong { color: var(--text); font-weight: 500; }
+  .annotation p + p { margin-top: 0.6rem; }
 
   /* ── Footer ── */
   footer {
@@ -243,7 +264,7 @@
     color: var(--faint);
     display: flex;
     justify-content: space-between;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 0.5rem;
   }
 
@@ -271,7 +292,7 @@
 <header>
   <p class="eyebrow">Climate Data · Spokane, WA</p>
   <h1>When does <em>winter</em> end<br>in Spokane?</h1>
-  <p class="subtitle">Tracking the last spring snowfall and first fall snowfall at Spokane International Airport from 1950 through 2024, using daily reanalysis data.</p>
+  <p class="subtitle">Tracking the last spring snowfall and first fall snowfall near Spokane International Airport since 1950, using daily ERA5 reanalysis data, with climate-model projections to 2050.</p>
 </header>
 
 <main>
@@ -279,6 +300,15 @@
     <div class="toggle-group">
       <button class="toggle-btn active" id="btn-spring" onclick="setMode('spring')">Last spring snow</button>
       <button class="toggle-btn" id="btn-fall" onclick="setMode('fall')">First fall snow</button>
+    </div>
+    <span class="control-label">Min. snowfall</span>
+    <div class="toggle-group" id="threshold-group">
+      <button class="toggle-btn active" data-th="0" onclick="setThreshold(0)">Any</button>
+      <button class="toggle-btn" data-th="0.5" onclick="setThreshold(0.5)">≥0.5 cm</button>
+      <button class="toggle-btn" data-th="1" onclick="setThreshold(1)">≥1 cm</button>
+    </div>
+    <div class="toggle-group">
+      <button class="toggle-btn" id="btn-proj" onclick="toggleProjections()" disabled>Projections</button>
     </div>
     <span class="loading-msg" id="loading-msg">Fetching data…</span>
   </div>
@@ -293,7 +323,8 @@
     </div>
     <div class="chart-legend">
       <span class="legend-item"><span class="legend-dot" id="legend-dot" style="background:#4a9eff"></span><span id="legend-series-label">Last spring snow (day of year)</span></span>
-      <span class="legend-item"><span class="legend-dash"></span>Linear trend</span>
+      <span class="legend-item"><span class="legend-dash"></span>Linear trend (observed)</span>
+      <span class="legend-item" id="legend-proj" hidden><span class="legend-band" id="legend-proj-band"></span>Projection: model median + range, 11-yr smoothed</span>
     </div>
   </div>
 
@@ -301,176 +332,337 @@
 </main>
 
 <footer>
-  <span>Source: <a href="https://open-meteo.com/" target="_blank">Open-Meteo Historical API</a> (ERA5 reanalysis) · Spokane, WA (47.62°N, 117.53°W)</span>
-  <span>Snowfall threshold: &gt;0 cm/day &nbsp;·&nbsp; Seasons split Jul 1</span>
+  <span>Observed: ERA5 reanalysis (Hersbach et al., 2020; ~25 km grid cell containing 47.62°N, 117.53°W) via the <a href="https://open-meteo.com/en/docs/historical-weather-api" target="_blank" rel="noopener">Open-Meteo Historical API</a>. ERA5 is a model-based reconstruction, not a station snow gauge.</span>
+  <span>Projections: CMIP6 high-resolution models (HiRAM-SIT-HR, MRI-AGCM3-2-S, EC-Earth3P-HR, MPI-ESM1-2-XR, NICAM16-8S), a high-emissions scenario described by the provider as "as close to RCP8.5 as possible", via the <a href="https://open-meteo.com/en/docs/climate-api" target="_blank" rel="noopener">Open-Meteo Climate API</a> (CC BY 4.0). Each model is shifted so its 1950–2024 mean matches ERA5's; only the change over time comes from the model.</span>
+  <span>A day counts as snowy when its snowfall meets the selected minimum. Results depend strongly on that choice. Spring = Jan 1–Jun 30; fall = Jul 1–Dec 31. Seasons still in progress are left out.</span>
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 const LAT = 47.6205, LON = -117.5326;
-const API = `https://archive-api.open-meteo.com/v1/archive?latitude=${LAT}&longitude=${LON}&start_date=1950-01-01&end_date=2024-12-31&daily=snowfall_sum&timezone=America%2FLos_Angeles`;
+const START_YEAR = 1950;
+// Common baseline for aligning model output to observations.
+const BASE_START = 1950, BASE_END = 2024;
+const PROJ_START = 2025, PROJ_END = 2050;
+const PROJ_WINDOW = 2041; // start of the decade summarised in the stats tile
+const SMOOTH_HALF = 5;    // ±5 years → 11-year running mean
+// CMCC-CM2-VHR4 and FGOALS-f3-H return only nulls for snowfall_sum at this
+// location, so they are omitted.
+const MODELS = ['HiRAM_SIT_HR', 'MRI_AGCM3_2_S', 'EC_Earth3P_HR', 'MPI_ESM1_2_XR', 'NICAM16_8S'];
 
 const MONTHS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const CUM    = [0,31,59,90,120,151,181,212,243,273,304,334,365];
 
+function isoDate(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+
+function yesterday() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return isoDate(d);
+}
+
+const ERA5_API = `https://archive-api.open-meteo.com/v1/archive?latitude=${LAT}&longitude=${LON}&start_date=${START_YEAR}-01-01&end_date=${yesterday()}&daily=snowfall_sum&models=era5&timezone=America%2FLos_Angeles`;
+const CLIMATE_API = `https://climate-api.open-meteo.com/v1/climate?latitude=${LAT}&longitude=${LON}&start_date=${START_YEAR}-01-01&end_date=${PROJ_END}-12-31&daily=snowfall_sum&models=${MODELS.join(',')}`;
+
+// Day of year on a fixed 365-day calendar, so the same date gets the same
+// number in leap and non-leap years and matches doyToLabel. Feb 29 → Feb 28.
+function dateToDOY(dateStr) {
+  const m = parseInt(dateStr.slice(5, 7), 10);
+  const d = parseInt(dateStr.slice(8, 10), 10);
+  return CUM[m-1] + (m === 2 ? Math.min(d, 28) : d);
+}
+
 function doyToLabel(doy) {
   for (let m = 12; m >= 1; m--) {
-    if (doy > CUM[m-1]) return MONTHS[m] + '\u00a0' + (doy - CUM[m-1]);
+    if (doy > CUM[m-1]) return MONTHS[m] + ' ' + (doy - CUM[m-1]);
   }
-  return 'Jan\u00a01';
+  return 'Jan 1';
 }
 
+function mean(a) { return a.reduce((s, v) => s + v, 0) / a.length; }
+
+function median(a) {
+  const s = [...a].sort((x, y) => x - y);
+  const h = Math.floor(s.length / 2);
+  return s.length % 2 ? s[h] : (s[h-1] + s[h]) / 2;
+}
+
+// Ordinary least squares with the standard error of the slope.
 function linReg(pts) {
   const n = pts.length;
-  let sx=0,sy=0,sxy=0,sxx=0;
-  pts.forEach(p=>{ sx+=p.x; sy+=p.y; sxy+=p.x*p.y; sxx+=p.x*p.x; });
-  const m = (n*sxy - sx*sy) / (n*sxx - sx*sx);
-  const b = (sy - m*sx) / n;
-  return { m, b };
+  const mx = mean(pts.map(p => p.x)), my = mean(pts.map(p => p.y));
+  let sxx = 0, sxy = 0;
+  pts.forEach(p => { sxx += (p.x-mx)**2; sxy += (p.x-mx)*(p.y-my); });
+  const m = sxy / sxx;
+  const b = my - m*mx;
+  let sse = 0;
+  pts.forEach(p => { sse += (p.y - (m*p.x + b))**2; });
+  const se = Math.sqrt(sse / (n - 2) / sxx);
+  return { m, b, se };
 }
 
-let allData = null;
-let mode    = 'spring';
-let chartInst = null;
+function isSnowDay(v, th) {
+  return v !== null && v !== undefined && (th === 0 ? v > 0 : v >= th);
+}
 
-async function fetchData() {
-  const res  = await fetch(API);
-  const json = await res.json();
-  const times = json.daily.time;
-  const snow  = json.daily.snowfall_sum;
-
-  const byYear = {};
+// Last spring (Jan 1–Jun 30) and first fall (Jul 1–Dec 31) snow day per
+// calendar year. A season is reported only once it is complete: spring after
+// Jun 30 has data, fall once a snow day is found or Dec 31 has data.
+// Returns { year: { spring: doy|null, fall: doy|null } } for complete seasons.
+function seasonEvents(times, vals, th) {
+  let lastData = null;
+  const raw = {};
   for (let i = 0; i < times.length; i++) {
-    const s = snow[i];
-    if (!s || s <= 0) continue;
-    const d    = times[i];
-    const year = parseInt(d.slice(0,4));
-    const mmdd = d.slice(5);
-    if (!byYear[year]) byYear[year] = { lastSpring: null, firstFall: null };
-    if (mmdd <= '06-30') byYear[year].lastSpring = d;
-    if (mmdd >= '07-01' && !byYear[year].firstFall) byYear[year].firstFall = d;
+    const v = vals[i];
+    if (v === null || v === undefined) continue;
+    const t = times[i];
+    lastData = t;
+    if (!isSnowDay(v, th)) continue;
+    const y = parseInt(t.slice(0, 4), 10);
+    const r = raw[y] || (raw[y] = { spring: null, fall: null });
+    if (t.slice(5) <= '06-30') r.spring = t;
+    else if (!r.fall) r.fall = t;
   }
-
-  function doy(dateStr) {
-    const d = new Date(dateStr + 'T12:00:00');
-    return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
+  const out = {};
+  if (!lastData) return out;
+  const lastYear = parseInt(lastData.slice(0, 4), 10);
+  for (let y = parseInt(times[0].slice(0, 4), 10); y <= lastYear; y++) {
+    const r = raw[y] || { spring: null, fall: null };
+    const springDone = lastData >= `${y}-06-30`;
+    const fallDone = r.fall !== null || lastData >= `${y}-12-31`;
+    out[y] = {
+      spring: springDone && r.spring ? dateToDOY(r.spring) : null,
+      fall:   fallDone && r.fall ? dateToDOY(r.fall) : null,
+    };
   }
+  return out;
+}
 
-  const rows = [];
-  for (let y = 1950; y <= 2024; y++) {
-    const v = byYear[y] || {};
-    rows.push({
-      year:          y,
-      lastSpringDate: v.lastSpring || null,
-      lastSpringDOY:  v.lastSpring ? doy(v.lastSpring) : null,
-      firstFallDate:  v.firstFall || null,
-      firstFallDOY:   v.firstFall ? doy(v.firstFall) : null,
+// Per-model change relative to the model's own baseline mean, smoothed, then
+// added to the observed baseline mean ("delta method"). This removes each
+// model's fixed bias; only the change over time comes from the model.
+function projectSeries(climate, th, mode, obsBaseMean) {
+  const perModel = [];
+  for (const id of MODELS) {
+    const vals = climate.daily['snowfall_sum_' + id];
+    if (!vals) continue;
+    const ev = seasonEvents(climate.daily.time, vals, th);
+    const byYear = {};
+    Object.keys(ev).forEach(y => { if (ev[y][mode] !== null) byYear[y] = ev[y][mode]; });
+    const base = Object.keys(byYear).filter(y => y >= BASE_START && y <= BASE_END).map(y => byYear[y]);
+    if (base.length < 30) continue;
+    const baseMean = mean(base);
+    const series = {};
+    for (let y = PROJ_START; y <= PROJ_END; y++) {
+      const win = [];
+      for (let k = y - SMOOTH_HALF; k <= y + SMOOTH_HALF; k++) {
+        if (byYear[k] !== undefined) win.push(byYear[k]);
+      }
+      if (win.length >= SMOOTH_HALF) series[y] = obsBaseMean + mean(win) - baseMean;
+    }
+    const decade = [];
+    for (let y = PROJ_WINDOW; y <= PROJ_END; y++) {
+      if (byYear[y] !== undefined) decade.push(byYear[y]);
+    }
+    perModel.push({
+      id, series,
+      decadeMean: decade.length ? obsBaseMean + mean(decade) - baseMean : null,
     });
   }
-  return rows;
+  if (!perModel.length) return null;
+
+  const med = [], lo = [], hi = [];
+  for (let y = PROJ_START; y <= PROJ_END; y++) {
+    const v = perModel.map(p => p.series[y]).filter(x => x !== undefined);
+    if (!v.length) continue;
+    med.push({ x: y, y: median(v) });
+    lo.push({ x: y, y: Math.min(...v) });
+    hi.push({ x: y, y: Math.max(...v) });
+  }
+  const dec = perModel.map(p => p.decadeMean).filter(x => x !== null);
+  return {
+    med, lo, hi,
+    nModels: perModel.length,
+    decade: dec.length ? { med: median(dec), min: Math.min(...dec), max: Math.max(...dec) } : null,
+  };
 }
 
-function renderStats(pts, mode) {
+let era5 = null, climate = null;
+let mode = 'spring', threshold = 0, showProj = false;
+let chartInst = null;
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).host}`);
+  const json = await res.json();
+  if (json.error) throw new Error(json.reason || 'API error');
+  return json;
+}
+
+function observedPoints() {
+  const ev = seasonEvents(era5.daily.time, era5.daily.snowfall_sum, threshold);
+  return Object.keys(ev).map(Number).sort((a, b) => a - b)
+    .filter(y => ev[y][mode] !== null)
+    .map(y => ({ x: y, y: ev[y][mode] }));
+}
+
+function fmtDays(v) { return Math.abs(v).toFixed(1); }
+
+function renderStats(pts, proj) {
   const isSpring = mode === 'spring';
-  const vals = pts.map(p => p.y);
   const reg  = linReg(pts);
-  const xMin = pts[0].x, xMax = pts[pts.length-1].x;
-  const decadeShift = reg.m * 10;
-  const dir = (isSpring ? decadeShift < 0 : decadeShift > 0) ? 'earlier' : 'later';
+  const x0 = pts[0].x, x1 = pts[pts.length-1].x;
+  const perDecade = reg.m * 10;
+  const ci = 1.96 * reg.se * 10;
+  const dir = perDecade < 0 ? 'earlier' : 'later';
+  const clear = Math.abs(reg.m) > 1.96 * reg.se;
 
-  const avg = vals.reduce((a,b)=>a+b,0) / vals.length;
-  const recent = pts.filter(p=>p.x>=2015).map(p=>p.y);
-  const recentAvg = recent.reduce((a,b)=>a+b,0) / recent.length;
-  const earliest = pts.reduce((a,b)=>a.y<b.y?a:b);
-  const latest   = pts.reduce((a,b)=>a.y>b.y?a:b);
-
+  const avg = mean(pts.map(p => p.y));
+  const recentPts = pts.slice(-10);
+  const recentAvg = mean(recentPts.map(p => p.y));
+  const basePts = pts.filter(p => p.x >= BASE_START && p.x <= BASE_END);
+  const baseAvg = mean(basePts.map(p => p.y));
+  const earliest = pts.reduce((a, b) => a.y <= b.y ? a : b);
+  const latest   = pts.reduce((a, b) => a.y >= b.y ? a : b);
+  const which = isSpring ? 'last' : 'first';
   const hlClass = isSpring ? 'highlight' : 'highlight-amber';
 
-  document.getElementById('stats').innerHTML = `
+  let html = `
     <div class="stat ${hlClass}">
       <div class="stat-label">Trend / decade</div>
-      <div class="stat-value">${Math.abs(decadeShift).toFixed(1)}d ${dir}</div>
+      <div class="stat-value">${clear ? `${fmtDays(perDecade)}d ${dir}` : 'No clear trend'}</div>
+      <div class="stat-sub">${perDecade >= 0 ? '+' : '−'}${fmtDays(perDecade)} ±${ci.toFixed(1)}d (95%)</div>
     </div>
     <div class="stat">
-      <div class="stat-label">1950–2024 avg</div>
+      <div class="stat-label">${x0}–${x1} avg</div>
       <div class="stat-value">${doyToLabel(Math.round(avg))}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">2015–2024 avg</div>
+      <div class="stat-label">${recentPts[0].x}–${x1} avg</div>
       <div class="stat-value">${doyToLabel(Math.round(recentAvg))}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">${isSpring ? 'Earliest last' : 'Earliest first'} snow</div>
+      <div class="stat-label">Earliest ${which} snow</div>
       <div class="stat-value">${doyToLabel(earliest.y)}</div>
       <div class="stat-sub">${earliest.x}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">${isSpring ? 'Latest last' : 'Latest first'} snow</div>
+      <div class="stat-label">Latest ${which} snow</div>
       <div class="stat-value">${doyToLabel(latest.y)}</div>
       <div class="stat-sub">${latest.x}</div>
-    </div>
-  `;
+    </div>`;
+  if (showProj && proj && proj.decade) {
+    html += `
+    <div class="stat ${hlClass}">
+      <div class="stat-label">Projected ${PROJ_WINDOW}–${PROJ_END}</div>
+      <div class="stat-value">${doyToLabel(Math.round(proj.decade.med))}</div>
+      <div class="stat-sub">range ${doyToLabel(Math.round(proj.decade.min))}–${doyToLabel(Math.round(proj.decade.max))}</div>
+    </div>`;
+  }
+  document.getElementById('stats').innerHTML = html;
 
-  const decadeAbs = Math.abs(decadeShift).toFixed(1);
-  const totalShift = Math.abs(reg.m * (xMax - xMin)).toFixed(0);
-  document.getElementById('annotation').innerHTML = isSpring
-    ? `<strong>Trend:</strong> The last spring snowfall in Spokane is shifting <strong>${decadeAbs} days earlier per decade</strong> — about <strong>${totalShift} days earlier</strong> in total since 1950. Year-to-year variance is high, so individual years can fall anywhere from February to late May. The 2008 outlier (a June snowfall) is the clearest exception in the record.`
-    : `<strong>Trend:</strong> The first fall snowfall is arriving <strong>${decadeAbs} days ${dir} per decade</strong> — a <strong>${totalShift}-day shift</strong> across the full record. Combined with the earlier end of spring snow, Spokane's snow-free window has widened measurably over 75 years.`;
+  const season = isSpring ? 'last spring snowfall' : 'first fall snowfall';
+  const paras = [];
+  let trend = `<strong>Observed:</strong> across ${pts.length} seasons (${x0}–${x1}), the ${season} moved <strong>${fmtDays(perDecade)} days ${dir} per decade</strong> (95% range ${(perDecade - ci).toFixed(1)} to ${(perDecade + ci).toFixed(1)}; negative = earlier). `;
+  trend += clear
+    ? `That is about <strong>${Math.abs(reg.m * (x1 - x0)).toFixed(0)} days ${dir}</strong> across the record, and the range excludes zero.`
+    : `That range includes zero, so this record does <strong>not show a clear trend</strong>. Year-to-year swings are much larger: from ${doyToLabel(earliest.y)} (${earliest.x}) to ${doyToLabel(latest.y)} (${latest.x}).`;
+  paras.push(trend);
+
+  if (showProj && proj && proj.decade) {
+    const shift = proj.decade.med - baseAvg;
+    const pdir = shift < 0 ? 'earlier' : 'later';
+    paras.push(`<strong>Projected:</strong> the median of ${proj.nModels} climate models puts the ${PROJ_WINDOW}–${PROJ_END} average at <strong>${doyToLabel(Math.round(proj.decade.med))}</strong>, about ${Math.abs(shift).toFixed(0)} days ${pdir} than the ${BASE_START}–${BASE_END} observed average (${doyToLabel(Math.round(baseAvg))}). Individual models range from ${doyToLabel(Math.round(proj.decade.min))} to ${doyToLabel(Math.round(proj.decade.max))}. This assumes a high-emissions scenario.`);
+  }
+
+  if (threshold === 0) {
+    paras.push(`"Any" counts days with only a trace of modelled snowfall. Try ≥1 cm to see how much the answer depends on that choice.`);
+  }
+  document.getElementById('annotation').innerHTML = paras.map(p => `<p>${p}</p>`).join('');
 }
 
 function draw() {
-  if (!allData) return;
+  if (!era5) return;
   const isSpring = mode === 'spring';
-  const pts = allData
-    .filter(r => (isSpring ? r.lastSpringDOY : r.firstFallDOY) !== null)
-    .map(r => ({ x: r.year, y: isSpring ? r.lastSpringDOY : r.firstFallDOY }));
+  const pts = observedPoints();
+  if (pts.length < 3) {
+    document.getElementById('stats').innerHTML = '<div class="error">Not enough data for this setting.</div>';
+    return;
+  }
 
   const reg  = linReg(pts);
   const xMin = pts[0].x, xMax = pts[pts.length-1].x;
   const trendLine = [{ x: xMin, y: reg.m*xMin+reg.b }, { x: xMax, y: reg.m*xMax+reg.b }];
 
-  const allY = pts.map(p=>p.y);
+  let proj = null;
+  if (climate) {
+    const basePts = pts.filter(p => p.x >= BASE_START && p.x <= BASE_END);
+    proj = projectSeries(climate, threshold, mode, mean(basePts.map(p => p.y)));
+  }
+  const projOn = showProj && proj;
+
+  const allY = pts.map(p => p.y);
+  if (projOn) proj.lo.concat(proj.hi).forEach(p => allY.push(p.y));
   const yPad = 10;
   const yMin = Math.min(...allY) - yPad;
   const yMax = Math.max(...allY) + yPad;
 
   const dotColor    = isSpring ? '#4a9eff' : '#f0a050';
   const dotColorBg  = isSpring ? 'rgba(74,158,255,0.55)' : 'rgba(240,160,80,0.55)';
+  const bandColor   = isSpring ? 'rgba(74,158,255,0.14)' : 'rgba(240,160,80,0.14)';
   const gridColor   = 'rgba(255,255,255,0.05)';
   const tickColor   = '#5a6878';
 
   document.getElementById('legend-dot').style.background = dotColor;
   document.getElementById('legend-series-label').textContent = isSpring
-    ? 'Last spring snow (day of year)'
-    : 'First fall snow (day of year)';
+    ? 'Last spring snow (observed)'
+    : 'First fall snow (observed)';
+  document.getElementById('legend-proj').hidden = !projOn;
+  const band = document.getElementById('legend-proj-band');
+  band.style.background = bandColor;
+  band.style.borderColor = dotColor;
+
+  const datasets = [
+    {
+      label: isSpring ? 'Last spring snow' : 'First fall snow',
+      data: pts,
+      backgroundColor: dotColorBg,
+      borderColor: dotColor,
+      borderWidth: 1,
+      pointRadius: 4.5,
+      pointHoverRadius: 7,
+    },
+    {
+      label: 'Trend',
+      data: trendLine,
+      type: 'line',
+      borderColor: 'rgba(255,255,255,0.25)',
+      borderWidth: 1.5,
+      borderDash: [6, 4],
+      pointRadius: 0,
+      tension: 0,
+    },
+  ];
+  if (projOn) {
+    datasets.push(
+      { label: 'Model max', data: proj.hi, type: 'line', borderWidth: 0, pointRadius: 0,
+        backgroundColor: bandColor, fill: '+1', tension: 0.3 },
+      { label: 'Model min', data: proj.lo, type: 'line', borderWidth: 0, pointRadius: 0,
+        fill: false, tension: 0.3 },
+      { label: 'Model median', data: proj.med, type: 'line', borderColor: dotColor,
+        borderWidth: 2, borderDash: [4, 3], pointRadius: 0, pointHoverRadius: 4,
+        fill: false, tension: 0.3 },
+    );
+  }
 
   if (chartInst) { chartInst.destroy(); chartInst = null; }
 
   chartInst = new Chart(document.getElementById('chart'), {
     type: 'scatter',
-    data: {
-      datasets: [
-        {
-          label: isSpring ? 'Last spring snow' : 'First fall snow',
-          data: pts,
-          backgroundColor: dotColorBg,
-          borderColor: dotColor,
-          borderWidth: 1,
-          pointRadius: 4.5,
-          pointHoverRadius: 7,
-        },
-        {
-          label: 'Trend',
-          data: trendLine,
-          type: 'line',
-          borderColor: 'rgba(255,255,255,0.25)',
-          borderWidth: 1.5,
-          borderDash: [6, 4],
-          pointRadius: 0,
-          tension: 0,
-        }
-      ]
-    },
+    data: { datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -486,11 +678,13 @@ function draw() {
           titleFont: { family: "'DM Mono', monospace", size: 11 },
           bodyFont: { family: "'Figtree', sans-serif", size: 12 },
           padding: 10,
+          filter: item => item.datasetIndex === 0 || item.dataset.label === 'Model median',
           callbacks: {
             title: ctx => ctx[0].raw.x.toString(),
             label: ctx => {
-              if (ctx.datasetIndex === 1) return null;
-              return ' ' + doyToLabel(Math.round(ctx.raw.y)) + '  (day ' + ctx.raw.y + ')';
+              const d = Math.round(ctx.raw.y);
+              if (ctx.datasetIndex === 0) return ' ' + doyToLabel(d) + '  (day ' + d + ')';
+              return ' Projected ' + doyToLabel(d) + ' (model median, smoothed)';
             }
           }
         }
@@ -499,7 +693,7 @@ function draw() {
         x: {
           type: 'linear',
           min: 1948,
-          max: 2026,
+          max: projOn ? PROJ_END + 2 : xMax + 2,
           ticks: {
             color: tickColor,
             font: { family: "'DM Mono', monospace", size: 10 },
@@ -524,7 +718,7 @@ function draw() {
     }
   });
 
-  renderStats(pts, mode);
+  renderStats(pts, proj);
 }
 
 function setMode(m) {
@@ -535,16 +729,58 @@ function setMode(m) {
   draw();
 }
 
-(async () => {
-  try {
-    allData = await fetchData();
-    document.getElementById('loading-msg').textContent = '75 years · Open-Meteo ERA5';
-    draw();
-  } catch (e) {
-    document.getElementById('loading-msg').textContent = 'Error loading data';
-    document.getElementById('stats').innerHTML = `<div class="error">Failed to fetch: ${e.message}</div>`;
-    console.error(e);
+function setThreshold(th) {
+  threshold = th;
+  document.querySelectorAll('#threshold-group .toggle-btn').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.th) === th);
+  });
+  draw();
+}
+
+let obsLabel = '';
+
+// The climate request is large and Open-Meteo rate-limits per minute, so it
+// is fetched only when the viewer first asks for projections.
+async function toggleProjections() {
+  const btn = document.getElementById('btn-proj');
+  const msg = document.getElementById('loading-msg');
+  if (!climate) {
+    btn.disabled = true;
+    msg.textContent = 'Fetching projections…';
+    try {
+      climate = await getJSON(CLIMATE_API);
+      msg.textContent = obsLabel;
+    } catch (e) {
+      msg.textContent = `Projections failed: ${e.message}`;
+      console.error(e);
+      btn.disabled = false;
+      return;
+    }
+    btn.disabled = false;
   }
+  showProj = !showProj;
+  btn.classList.toggle('active', showProj);
+  draw();
+}
+
+(async () => {
+  const msg = document.getElementById('loading-msg');
+  try {
+    era5 = await getJSON(ERA5_API);
+  } catch (e) {
+    msg.textContent = 'Error loading data';
+    const err = document.createElement('div');
+    err.className = 'error';
+    err.textContent = `Failed to fetch observations: ${e.message}`;
+    document.getElementById('stats').replaceChildren(err);
+    console.error(e);
+    return;
+  }
+  const years = era5.daily.time;
+  obsLabel = `${years[0].slice(0, 4)}–${years[years.length-1].slice(0, 4)} · ERA5`;
+  msg.textContent = obsLabel;
+  document.getElementById('btn-proj').disabled = false;
+  draw();
 })();
 </script>
 </body>
