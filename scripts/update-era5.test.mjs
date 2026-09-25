@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { addDays, lastDataDate, merge, validate, archiveUrl, main } from './update-era5.mjs';
+import { addDays, lastDataDate, merge, validate, archiveUrl, refresh, adopt, laDate, isContiguous } from './update-era5.mjs';
 
 const seed = JSON.parse(readFileSync(new URL('../data/era5.json', import.meta.url), 'utf8')).daily;
 
@@ -78,7 +78,12 @@ function tmpFile(daily) {
   return f;
 }
 
-test('main fetches only the trailing window and writes the merge', async () => {
+// "Today" is the day after the seed's last date, so this holds whenever the
+// committed data is refreshed.
+const seedEnd = seed.time[seed.time.length - 1];
+const dayAfterSeed = new Date(addDays(seedEnd, 1) + 'T19:00:00Z'); // midday in LA
+
+test('refresh fetches only the trailing window and writes the merge', async () => {
   const f = tmpFile(slice(seed, '1950-01-01', '2026-08-01'));
   const urls = [];
   const fetchImpl = async url => {
@@ -89,18 +94,58 @@ test('main fetches only the trailing window and writes the merge', async () => {
       daily_units: { snowfall_sum: 'cm' },
     }) };
   };
-  await main(f, { fetchImpl, today: new Date('2026-09-25T12:00:00Z') });
+  await refresh(f, { fetchImpl, today: dayAfterSeed });
   assert.equal(urls.length, 1);
   const q = new URL(urls[0]).searchParams;
   assert.equal(q.get('start_date'), addDays('2026-08-01', -90));
-  assert.equal(q.get('end_date'), '2026-09-24');
+  assert.equal(q.get('end_date'), seedEnd);
   assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')).daily, seed);
 });
 
-test('main leaves the file untouched when the API refuses', async () => {
+test('refresh leaves the file untouched when the API refuses', async () => {
   const before = { time: ['2026-01-01'], snowfall_sum: [1] };
   const f = tmpFile(before);
   const fetchImpl = async () => ({ ok: false, status: 429, json: async () => ({ reason: 'Daily API request limit exceeded.' }) });
-  await assert.rejects(main(f, { fetchImpl, today: new Date('2026-01-10T00:00:00Z') }), /429.*Daily/);
+  await assert.rejects(refresh(f, { fetchImpl, today: new Date('2026-01-10T00:00:00Z') }), /429.*Daily/);
   assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')).daily, before);
+});
+
+test('laDate uses the Los Angeles calendar day', () => {
+  assert.equal(laDate(new Date('2026-09-25T03:00:00Z')), '2026-09-24');
+  assert.equal(laDate(new Date('2026-09-25T19:00:00Z')), '2026-09-25');
+});
+
+test('isContiguous detects a missing day', () => {
+  assert.ok(isContiguous({ time: ['2026-02-28', '2026-03-01'] }));
+  assert.ok(!isContiguous({ time: ['2026-02-27', '2026-03-01'] }));
+});
+
+function served(body, status = 200) {
+  return async () => ({ ok: status === 200, status, json: async () => body });
+}
+
+test('adopt takes the deployed file when it has later data', async () => {
+  const f = tmpFile(slice(seed, '1950-01-01', '2026-08-01'));
+  assert.equal(await adopt(f, 'u', { fetchImpl: served({ daily: seed }) }), true);
+  assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')).daily, seed);
+});
+
+test('adopt keeps the committed file when it is as new or newer', async () => {
+  const f = tmpFile(seed);
+  const older = slice(seed, '1950-01-01', '2026-08-01');
+  assert.equal(await adopt(f, 'u', { fetchImpl: served({ daily: older }) }), false);
+  assert.equal(await adopt(f, 'u', { fetchImpl: served({ daily: seed }) }), false);
+  assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')).daily, seed);
+});
+
+test('adopt rejects a malformed or failed deployed file and keeps ours', async () => {
+  const f = tmpFile(slice(seed, '1950-01-01', '2026-08-01'));
+  const before = readFileSync(f, 'utf8');
+  const gappy = { time: ['1950-01-01', '1950-01-03'], snowfall_sum: [0, 1] };
+  const lateStart = slice(seed, '1951-01-01', seedEnd);
+  await assert.rejects(adopt(f, 'u', { fetchImpl: served({ daily: gappy }) }), /valid series/);
+  await assert.rejects(adopt(f, 'u', { fetchImpl: served({ daily: lateStart }) }), /valid series/);
+  await assert.rejects(adopt(f, 'u', { fetchImpl: served({}) }), /valid series/);
+  await assert.rejects(adopt(f, 'u', { fetchImpl: served(null, 404) }), /404/);
+  assert.equal(readFileSync(f, 'utf8'), before);
 });

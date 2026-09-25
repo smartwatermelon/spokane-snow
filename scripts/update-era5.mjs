@@ -7,7 +7,13 @@
 // a 10,000/day free limit. This script fetches only a trailing window,
 // which also picks up ERA5 revisions to recent days.
 //
-// Usage: node scripts/update-era5.mjs [path/to/era5.json]
+// State between runs lives in the deployed site: `adopt` replaces the
+// committed file with the currently deployed one when that is newer, so each
+// run fetches only ~90 days and a failed fetch never rolls the site back.
+//
+// Usage:
+//   node scripts/update-era5.mjs adopt   data/era5.json <deployed era5.json URL>
+//   node scripts/update-era5.mjs refresh data/era5.json
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -67,12 +73,50 @@ export function validate(json) {
   return d;
 }
 
-export async function main(file, { fetchImpl = fetch, today = new Date() } = {}) {
-  const data = JSON.parse(readFileSync(file, 'utf8'));
-  const last = lastDataDate(data.daily);
+// YYYY-MM-DD in America/Los_Angeles, the timezone the archive request uses.
+export function laDate(d) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(d);
+}
+
+export function isContiguous(daily) {
+  for (let i = 1; i < daily.time.length; i++) {
+    if (daily.time[i] !== addDays(daily.time[i - 1], 1)) return false;
+  }
+  return true;
+}
+
+function readDaily(file) {
+  return JSON.parse(readFileSync(file, 'utf8')).daily;
+}
+
+// Replaces `file` with the deployed copy at `url` when that copy is a valid
+// series with the same start date and later data. Returns true if adopted.
+export async function adopt(file, url, { fetchImpl = fetch } = {}) {
+  const current = readDaily(file);
+  const res = await fetchImpl(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  const deployed = (await res.json()).daily;
+  if (!deployed || !Array.isArray(deployed.time) || !Array.isArray(deployed.snowfall_sum)
+      || deployed.time.length !== deployed.snowfall_sum.length
+      || deployed.time[0] !== current.time[0] || !isContiguous(deployed)) {
+    throw new Error(`deployed data at ${url} is not a valid series`);
+  }
+  const ours = lastDataDate(current), theirs = lastDataDate(deployed);
+  if (!theirs || (ours && theirs <= ours)) {
+    console.log(`Keeping committed data (through ${ours}; deployed through ${theirs}).`);
+    return false;
+  }
+  writeFileSync(file, JSON.stringify({ daily: deployed }) + '\n');
+  console.log(`Adopted deployed data (through ${theirs}; committed through ${ours}).`);
+  return true;
+}
+
+export async function refresh(file, { fetchImpl = fetch, today = new Date() } = {}) {
+  const daily = readDaily(file);
+  const last = lastDataDate(daily);
   if (!last) throw new Error(`${file} has no data`);
   const start = addDays(last, -WINDOW_DAYS);
-  const end = addDays(today.toISOString().slice(0, 10), -1);
+  const end = addDays(laDate(today), -1);
   if (start > end) {
     console.log(`Nothing to fetch (last data ${last}).`);
     return;
@@ -83,13 +127,17 @@ export async function main(file, { fetchImpl = fetch, today = new Date() } = {})
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} from Open-Meteo: ${body && body.reason}`);
   }
-  const merged = merge(data.daily, validate(body));
+  const merged = merge(daily, validate(body));
   writeFileSync(file, JSON.stringify({ daily: merged }) + '\n');
   console.log(`Fetched ${start}..${end}; data now through ${lastDataDate(merged)}.`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main(process.argv[2] || 'data/era5.json').catch(e => {
+  const [cmd, file, url] = process.argv.slice(2);
+  const run = cmd === 'adopt' && file && url ? adopt(file, url)
+    : cmd === 'refresh' && file ? refresh(file)
+    : Promise.reject(new Error('usage: update-era5.mjs adopt <file> <url> | refresh <file>'));
+  run.catch(e => {
     console.error(e.message);
     process.exit(1);
   });
