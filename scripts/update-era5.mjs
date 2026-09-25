@@ -89,8 +89,10 @@ function readDaily(file) {
   return JSON.parse(readFileSync(file, 'utf8')).daily;
 }
 
-// Replaces `file` with the deployed copy at `url` when that copy is a valid
-// series with the same start date and later data. Returns true if adopted.
+// When the deployed copy at `url` is a valid series with the same start
+// date and later data, rewrites `file` as the deployed series with the
+// committed values laid over it: newer days come from the deployment, and
+// committed corrections to older history still ship. Returns true if adopted.
 export async function adopt(file, url, { fetchImpl = fetch } = {}) {
   const current = readDaily(file);
   const res = await fetchImpl(url);
@@ -98,7 +100,8 @@ export async function adopt(file, url, { fetchImpl = fetch } = {}) {
   const deployed = (await res.json()).daily;
   if (!deployed || !Array.isArray(deployed.time) || !Array.isArray(deployed.snowfall_sum)
       || deployed.time.length !== deployed.snowfall_sum.length
-      || deployed.time[0] !== current.time[0] || !isContiguous(deployed)) {
+      || deployed.time[0] !== current.time[0] || !isContiguous(deployed)
+      || !deployed.snowfall_sum.every(v => v === null || typeof v === 'number')) {
     throw new Error(`deployed data at ${url} is not a valid series`);
   }
   const ours = lastDataDate(current), theirs = lastDataDate(deployed);
@@ -106,7 +109,7 @@ export async function adopt(file, url, { fetchImpl = fetch } = {}) {
     console.log(`Keeping committed data (through ${ours}; deployed through ${theirs}).`);
     return false;
   }
-  writeFileSync(file, JSON.stringify({ daily: deployed }) + '\n');
+  writeFileSync(file, JSON.stringify({ daily: merge(deployed, current) }) + '\n');
   console.log(`Adopted deployed data (through ${theirs}; committed through ${ours}).`);
   return true;
 }

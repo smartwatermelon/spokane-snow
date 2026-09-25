@@ -146,6 +146,19 @@ test('adopt rejects a malformed or failed deployed file and keeps ours', async (
   await assert.rejects(adopt(f, 'u', { fetchImpl: served({ daily: gappy }) }), /valid series/);
   await assert.rejects(adopt(f, 'u', { fetchImpl: served({ daily: lateStart }) }), /valid series/);
   await assert.rejects(adopt(f, 'u', { fetchImpl: served({}) }), /valid series/);
+  const badValue = { time: ['1950-01-01', '1950-01-02'], snowfall_sum: [0, '1'] };
+  await assert.rejects(adopt(f, 'u', { fetchImpl: served({ daily: badValue }) }), /valid series/);
   await assert.rejects(adopt(f, 'u', { fetchImpl: served(null, 404) }), /404/);
   assert.equal(readFileSync(f, 'utf8'), before);
+});
+
+test('adopt keeps committed corrections to older history', async () => {
+  const corrected = slice(seed, '1950-01-01', '2026-08-01');
+  corrected.snowfall_sum[0] = 99.9; // a committed fix to 1950-01-01
+  const f = tmpFile(corrected);
+  assert.equal(await adopt(f, 'u', { fetchImpl: served({ daily: seed }) }), true);
+  const out = JSON.parse(readFileSync(f, 'utf8')).daily;
+  assert.equal(out.snowfall_sum[0], 99.9);
+  assert.equal(lastDataDate(out), lastDataDate(seed));
+  assert.equal(out.time.length, seed.time.length);
 });
